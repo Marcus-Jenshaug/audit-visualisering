@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aktivitetsdashboard</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN for charting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .card {
+            background-color: #fff;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        /* Custom scrollbar for better UX */
+        .overflow-x-auto::-webkit-scrollbar {
+            height: 8px;
+        }
+        .overflow-x-auto::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .overflow-x-auto::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 sm:p-6 md:p-8">
+    <div class="container">
+        <h1 class="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-8">Din aktivitetsrapport</h1>
+
+        <!-- Summary Section -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="card">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">Total aktivitet</h2>
+                <p class="text-gray-600">
+                    Siden 16. januar 2024 har du utført <span id="totalEvents" class="font-bold text-blue-600 text-2xl">0</span> hendelser.
+                </p>
+                <p class="text-gray-600 mt-2">
+                    Dette dashboardet visualiserer din daglige arbeidsmengde basert på loggdata.
+                </p>
+            </div>
+            <div class="card">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">Topp 5 handlinger</h2>
+                <ul id="topActionsList" class="list-disc list-inside text-gray-600">
+                    <!-- Top actions will be inserted here by JavaScript -->
+                </ul>
+            </div>
+        </div>
+
+        <!-- Chart Section -->
+        <div class="card">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Daglig aktivitetsnivå</h2>
+            <div class="relative mb-4">
+                <label for="dateRange" class="block text-gray-700 text-sm font-bold mb-2">Velg datoperiode:</label>
+                <select id="dateRange" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                    <option value="last30days">Siste 30 dager</option>
+                    <option value="last90days">Siste 90 dager</option>
+                    <option value="last180days">Siste 180 dager</option>
+                    <option value="allTime">Hele perioden</option>
+                    <option value="custom">Tilpasset periode (velg nedenfor)</option>
+                </select>
+            </div>
+            <div id="customDateRange" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 hidden">
+                <div>
+                    <label for="startDate" class="block text-gray-700 text-sm font-bold mb-2">Startdato:</label>
+                    <input type="date" id="startDate" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                <div>
+                    <label for="endDate" class="block text-gray-700 text-sm font-bold mb-2">Sluttdato:</label>
+                    <input type="date" id="endDate" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <div class="chart-container" style="min-width: 600px;"> <!-- Minimum width for chart on small screens -->
+                    <canvas id="activityChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global variables for Firebase configuration and app ID
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Define the uploaded file name
+        const uploadedFileName = 'export-eiendomsavtaler-1-1754309573.json';
+
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        let db, auth, userId;
+        let chartInstance = null; // To store the Chart.js instance
+
+        // Function to initialize Firebase and authenticate
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Sign in with custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Listen for auth state changes to get the user ID
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Firebase initialized and user authenticated:", userId);
+                        fetchAndProcessData(); // Fetch data after auth is ready
+                    } else {
+                        console.log("No user signed in. Using anonymous user ID if needed.");
+                        userId = crypto.randomUUID(); // Fallback for unauthenticated users
+                        fetchAndProcessData(); // Fetch data even if anonymous
+                    }
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                // Display a user-friendly message if Firebase fails to initialize
+                document.getElementById('totalEvents').innerText = 'Feil ved lasting av data.';
+                document.getElementById('topActionsList').innerHTML = '<li>Kunne ikke laste aktivitetsdata. Vennligst prøv igjen senere.</li>';
+            }
+        }
+
+        // Function to fetch and process data from the uploaded JSON file
+        async function fetchAndProcessData() {
+            try {
+                // Fetch the content of the uploaded JSON file using the defined file name
+                const response = await fetch(`uploaded:${uploadedFileName}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const textData = await response.text();
+
+                // Split the text into lines and parse each line as a JSON object
+                const lines = textData.split('\n').filter(line => line.trim() !== '');
+                const rawData = lines.map(line => JSON.parse(line));
+
+                // Filter data for the specific user "Marcus-Jenshaug"
+                const userEvents = rawData.filter(event => event.actor === "Marcus-Jenshaug");
+
+                // Aggregate data
+                const dailyActivity = {};
+                const actionCounts = {};
+                let earliestTimestamp = Infinity;
+                let latestTimestamp = 0;
+
+                userEvents.forEach(event => {
+                    const timestamp = event['@timestamp'];
+                    if (timestamp) {
+                        const date = new Date(timestamp);
+                        earliestTimestamp = Math.min(earliestTimestamp, timestamp);
+                        latestTimestamp = Math.max(latestTimestamp, timestamp);
+
+                        const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
+                        dailyActivity[dateString] = (dailyActivity[dateString] || 0) + 1;
+
+                        const action = event.action;
+                        actionCounts[action] = (actionCounts[action] || 0) + 1;
+                    }
+                });
+
+                // Sort daily activity by date
+                const sortedDailyActivity = Object.keys(dailyActivity)
+                    .sort((a, b) => new Date(a) - new Date(b))
+                    .map(date => ({ date, count: dailyActivity[date] }));
+
+                // Sort action counts
+                const sortedActionCounts = Object.entries(actionCounts)
+                    .sort(([, countA], [, countB]) => countB - countA)
+                    .slice(0, 5); // Get top 5
+
+                // Update summary section
+                document.getElementById('totalEvents').innerText = userEvents.length.toLocaleString('no-NO');
+                const topActionsList = document.getElementById('topActionsList');
+                topActionsList.innerHTML = ''; // Clear previous list
+                sortedActionCounts.forEach(([action, count]) => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = `${action}: ${count.toLocaleString('no-NO')} ganger`;
+                    topActionsList.appendChild(listItem);
+                });
+
+                // Store processed data globally for chart updates
+                window.processedData = {
+                    dailyActivity: sortedDailyActivity,
+                    earliestDate: new Date(earliestTimestamp),
+                    latestDate: new Date(latestTimestamp)
+                };
+
+                // Initial chart render with default range (last 30 days)
+                updateChart();
+
+            } catch (error) {
+                console.error("Error fetching or processing data:", error);
+                document.getElementById('totalEvents').innerText = 'Kunne ikke laste data.';
+                document.getElementById('topActionsList').innerHTML = `<li>En feil oppstod under lasting av aktivitetsdata. Dette kan skyldes problemer med å hente filen '${uploadedFileName}'. Vennligst sjekk filnavnet og prøv igjen.</li>`;
+            }
+        }
+
+        // Function to update the chart based on selected date range
+        function updateChart() {
+            if (!window.processedData) return; // Ensure data is loaded
+
+            const { dailyActivity, earliestDate, latestDate } = window.processedData;
+            const dateRangeSelect = document.getElementById('dateRange');
+            const customDateRangeDiv = document.getElementById('customDateRange');
+            const startDateInput = document.getElementById('startDate');
+            const endDateInput = document.getElementById('endDate');
+
+            let filteredData = [];
+            let chartTitle = 'Daglig aktivitetsnivå';
+
+            const today = new Date();
+            let filterStartDate = null;
+            let filterEndDate = today;
+
+            if (dateRangeSelect.value === 'custom') {
+                customDateRangeDiv.classList.remove('hidden');
+                filterStartDate = startDateInput.value ? new Date(startDateInput.value) : null;
+                filterEndDate = endDateInput.value ? new Date(endDateInput.value) : today;
+                if (filterStartDate) chartTitle += ` (${filterStartDate.toLocaleDateString('no-NO')} - ${filterEndDate.toLocaleDateString('no-NO')})`;
+            } else {
+                customDateRangeDiv.classList.add('hidden');
+                if (dateRangeSelect.value === 'last30days') {
+                    filterStartDate = new Date(today);
+                    filterStartDate.setDate(today.getDate() - 30);
+                    chartTitle += ' (Siste 30 dager)';
+                } else if (dateRangeSelect.value === 'last90days') {
+                    filterStartDate = new Date(today);
+                    filterStartDate.setDate(today.getDate() - 90);
+                    chartTitle += ' (Siste 90 dager)';
+                } else if (dateRangeSelect.value === 'last180days') {
+                    filterStartDate = new Date(today);
+                    filterStartDate.setDate(today.getDate() - 180);
+                    chartTitle += ' (Siste 180 dager)';
+                } else if (dateRangeSelect.value === 'allTime') {
+                    filterStartDate = earliestDate;
+                    filterEndDate = latestDate;
+                    chartTitle += ' (Hele perioden)';
+                }
+            }
+
+            filteredData = dailyActivity.filter(item => {
+                const itemDate = new Date(item.date);
+                return (!filterStartDate || itemDate >= filterStartDate) && (itemDate <= filterEndDate);
+            });
+
+            const labels = filteredData.map(item => item.date);
+            const data = filteredData.map(item => item.count);
+
+            const ctx = document.getElementById('activityChart').getContext('2d');
+
+            if (chartInstance) {
+                chartInstance.destroy(); // Destroy previous chart instance
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Antall hendelser',
+                        data: data,
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)', // Tailwind blue-500 with opacity
+                        borderColor: 'rgba(37, 99, 235, 1)',    // Tailwind blue-600
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false, // Allow chart to fill container
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: chartTitle,
+                            font: {
+                                size: 18
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Hendelser: ${context.parsed.y.toLocaleString('no-NO')}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Dato'
+                            },
+                            ticks: {
+                                autoSkip: true,
+                                maxTicksLimit: 20 // Adjust based on data density
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Antall hendelser'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString('no-NO');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Event listeners for date range selection
+        document.getElementById('dateRange').addEventListener('change', updateChart);
+        document.getElementById('startDate').addEventListener('change', updateChart);
+        document.getElementById('endDate').addEventListener('change', updateChart);
+
+        // Initialize Firebase on window load
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>
