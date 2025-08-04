@@ -103,61 +103,16 @@
     </div>
 
     <script type="module">
-        // Global variables for Firebase configuration and app ID
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
         // Define the uploaded file name
         const uploadedFileName = 'export-eiendomsavtaler-1-1754309573.json';
 
-        // Import Firebase modules
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        let db, auth, userId;
         let chartInstance = null; // To store the Chart.js instance
-
-        // Function to initialize Firebase and authenticate
-        async function initializeFirebase() {
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Sign in with custom token or anonymously
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                // Listen for auth state changes to get the user ID
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Firebase initialized and user authenticated:", userId);
-                        fetchAndProcessData(); // Fetch data after auth is ready
-                    } else {
-                        console.log("No user signed in. Using anonymous user ID if needed.");
-                        userId = crypto.randomUUID(); // Fallback for unauthenticated users
-                        fetchAndProcessData(); // Fetch data even if anonymous
-                    }
-                });
-            } catch (error) {
-                console.error("Error initializing Firebase:", error);
-                // Display a user-friendly message if Firebase fails to initialize
-                document.getElementById('totalEvents').innerText = 'Feil ved lasting av data.';
-                document.getElementById('topActionsList').innerHTML = '<li>Kunne ikke laste aktivitetsdata. Vennligst prøv igjen senere.</li>';
-            }
-        }
 
         // Function to fetch and process data from the uploaded JSON file
         async function fetchAndProcessData() {
             try {
                 // Fetch the content of the uploaded JSON file using the defined file name
-                const response = await fetch(`uploaded:${uploadedFileName}`);
+                const response = await fetch(uploadedFileName);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -350,8 +305,8 @@
         document.getElementById('startDate').addEventListener('change', updateChart);
         document.getElementById('endDate').addEventListener('change', updateChart);
 
-        // Initialize Firebase on window load
-        window.onload = initializeFirebase;
+        // Fetch and process data on window load
+        window.onload = fetchAndProcessData;
     </script>
 </body>
 </html>
